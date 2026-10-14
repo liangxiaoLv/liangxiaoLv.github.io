@@ -12,8 +12,13 @@
     main{padding:18px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
     h2{margin:0 0 12px;font-size:15px}.unit{color:var(--muted);font-size:12px;font-weight:normal}.values{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
     .value{padding:10px 5px;border-radius:7px;background:var(--bg);text-align:center}.axis{color:var(--muted);font-size:12px}.num{margin-top:4px;font:600 20px ui-monospace,SFMono-Regular,Menlo,monospace}
-    .chart{grid-column:1/-1;height:280px;padding:8px}canvas{width:100%;height:100%;display:block}.hint{margin:0 22px 20px;color:var(--muted);font-size:12px}
-    @media(max-width:800px){main{grid-template-columns:1fr}}
+    .pose{grid-column:1/-1;display:grid;grid-template-columns:minmax(260px,1fr) minmax(240px,1fr);gap:16px}.stage{min-height:340px;display:grid;place-items:center;perspective:800px;background:radial-gradient(#263241,#0d1117 70%);overflow:hidden}
+    .scene{width:230px;height:170px;position:relative;transform-style:preserve-3d}.board{width:230px;height:170px;position:absolute;border:2px solid #69b7ff;border-radius:12px;background:linear-gradient(135deg,#1e5d84,#12354d);box-shadow:0 0 28px #1976a855;transform-style:preserve-3d;transition:transform .04s linear}
+    .board:before{content:'IMU';position:absolute;inset:44px 70px;border:2px solid #b6e3ff;border-radius:5px;display:grid;place-items:center;color:#cceeff;font-weight:700;transform:translateZ(4px)}
+    .board:after{content:'X →';position:absolute;right:12px;top:12px;color:#ff7b72;font-weight:700;transform:translateZ(4px)}
+    .axis3d{position:absolute;left:115px;top:85px;width:100px;height:2px;background:#ff7b72;transform-origin:left center;transform:translateZ(8px)}.axis3d:after{content:'Y';position:absolute;left:82px;top:-8px;color:#7ee787;font-weight:bold}.axis3d:before{content:'';position:absolute;left:0;top:-40px;width:2px;height:40px;background:#58a6ff}.angles{display:grid;align-content:center;gap:12px}.angle{font:600 19px ui-monospace,SFMono-Regular,Menlo,monospace}.angle small{display:block;color:var(--muted);font:12px sans-serif;margin-bottom:3px}
+    .chart{grid-column:1/-1;height:220px;padding:8px}canvas{width:100%;height:100%;display:block}.hint{margin:0 22px 20px;color:var(--muted);font-size:12px}
+    @media(max-width:800px){main{grid-template-columns:1fr}.pose{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -25,22 +30,35 @@
     <section class="card"><h2>加速度 <span class="unit">g</span></h2><div class="values" id="acc"></div></section>
     <section class="card"><h2>陀螺仪 <span class="unit">dps</span></h2><div class="values" id="gyro"></div></section>
     <section class="card"><h2>磁力计 <span class="unit">G</span></h2><div class="values" id="mag"></div></section>
+    <section class="card pose"><div class="stage"><div class="scene"><div id="board" class="board"></div><div class="axis3d"></div></div></div><div class="angles"><div class="angle"><small>ROLL 横滚</small><span id="roll">0.0°</span></div><div class="angle"><small>PITCH 俯仰</small><span id="pitch">0.0°</span></div><div class="angle"><small>YAW 航向</small><span id="yaw">0.0°</span></div><div class="unit">姿态由加速度、陀螺仪和磁力计融合计算。静止时模型会逐渐校正到当前方向。</div></div></section>
     <section class="card chart"><canvas id="plot"></canvas></section>
   </main>
-  <p class="hint">数据链路：ESP32 → POT-DEV → Mac collector-box → 本页面。页面部署在 GitHub Pages，接收服务运行在你的 Mac 上。</p>
+  <p class="hint">数据链路：ESP32 → POT-DEV → Mac collector-box → 本页面。GitHub Pages 托管界面，Mac 本地服务提供 WebSocket。</p>
   <script>
-    const labels={acc:['X','Y','Z'],gyro:['X','Y','Z'],mag:['X','Y','Z']};
-    const hist={acc:[[],[],[]],gyro:[[],[],[]],mag:[[],[],[]]},colors=['#f778ba','#58a6ff','#3fb950'],max=300;
-    const scales={acc:4/32768,gyro:64/32768,mag:1/3000};
+    const labels={acc:['X','Y','Z'],gyro:['X','Y','Z'],mag:['X','Y','Z']},hist={acc:[[],[],[]],gyro:[[],[],[]],mag:[[],[],[]]},colors=['#f778ba','#58a6ff','#3fb950'],max=300;
+    const scale={acc:4/32768,gyro:64/32768,mag:1/3000},state={roll:0,pitch:0,yaw:0,ready:false};
     function group(id,v){document.getElementById(id).innerHTML=v.map((n,i)=>`<div class="value"><div class="axis">${labels[id][i]}</div><div class="num">${n.toFixed(3)}</div></div>`).join('')}
     function push(id,v){v.forEach((n,i)=>{hist[id][i].push(n);if(hist[id][i].length>max)hist[id][i].shift()})}
-    function draw(){const c=document.getElementById('plot'),d=devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;if(c.width!==w*d||c.height!==h*d){c.width=w*d;c.height=h*d}const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,w,h);const a=Object.values(hist).flat(2);let lo=Math.min(...a),hi=Math.max(...a);if(!a.length||!isFinite(lo)){lo=-1;hi=1}if(lo===hi){lo-=1;hi+=1}const p=(hi-lo)*.1;lo-=p;hi+=p;x.strokeStyle='#30363d';x.beginPath();x.moveTo(0,h/2);x.lineTo(w,h/2);x.stroke();let k=0;for(const g of Object.values(hist))for(const b of g){if(b.length<2){k++;continue}x.strokeStyle=colors[k%3];x.lineWidth=1.5;x.beginPath();b.forEach((v,i)=>{const px=i/(max-1)*w,py=h-(v-lo)/(hi-lo)*h;i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke();k++}requestAnimationFrame(draw)}
-    const status=document.getElementById('status');
-    const ws=new WebSocket('ws://127.0.0.1:8080/ws/live');
-    ws.onopen=()=>{status.textContent='已连接 Mac，等待 IMU 数据';status.className='status live'};
-    ws.onclose=()=>{status.textContent='Mac 接收服务未连接';status.className='status'};
-    ws.onerror=()=>{status.textContent='无法连接 Mac 接收服务'};
-    ws.onmessage=e=>{if(typeof e.data!=='string')return;const m=JSON.parse(e.data);if(m.type!=='imu')return;const a=m.accel.map(v=>v*scales.acc),g=m.gyro.map(v=>v*scales.gyro),q=m.mag.map(v=>v*scales.mag);document.getElementById('sn').textContent=m.sn||'—';document.getElementById('rate').textContent=m.rate_hz;document.getElementById('seq').textContent=m.seq;document.getElementById('count').textContent=m.sample_count;group('acc',a);group('gyro',g);group('mag',q);push('acc',a);push('gyro',g);push('mag',q)};
+    function wrap(a){while(a>Math.PI)a-=2*Math.PI;while(a<-Math.PI)a+=2*Math.PI;return a}
+    function blend(old,next,a){return old+wrap(next-old)*a}
+    function fuse(a,g,m,dt){
+      const rollA=Math.atan2(a[1],a[2]),pitchA=Math.atan2(-a[0],Math.hypot(a[1],a[2]));
+      if(!state.ready){state.roll=rollA;state.pitch=pitchA;state.ready=true}
+      state.roll+=g[0]*Math.PI/180*dt;state.pitch+=g[1]*Math.PI/180*dt;state.yaw+=g[2]*Math.PI/180*dt;
+      state.roll=blend(state.roll,rollA,.025);state.pitch=blend(state.pitch,pitchA,.025);
+      const cr=Math.cos(state.roll),sr=Math.sin(state.roll),cp=Math.cos(state.pitch),sp=Math.sin(state.pitch);
+      const hx=m[0]*cp+m[2]*sp,hy=m[0]*sr*sp+m[1]*cr-m[2]*sr*cp;
+      if(Math.hypot(hx,hy)>1e-6)state.yaw=blend(state.yaw,Math.atan2(-hy,hx),.01);
+      const d=state.roll*180/Math.PI,p=state.pitch*180/Math.PI,y=state.yaw*180/Math.PI;
+      document.getElementById('roll').textContent=d.toFixed(1)+'°';document.getElementById('pitch').textContent=p.toFixed(1)+'°';document.getElementById('yaw').textContent=y.toFixed(1)+'°';
+      document.getElementById('board').style.transform=`rotateX(${p.toFixed(2)}deg) rotateY(${y.toFixed(2)}deg) rotateZ(${d.toFixed(2)}deg)`;
+    }
+    function draw(){const c=document.getElementById('plot'),d=devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;if(c.width!==w*d||c.height!==h*d){c.width=w*d;c.height=h*d}const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,w,h);const all=Object.values(hist).flat(2);let lo=Math.min(...all),hi=Math.max(...all);if(!all.length||!isFinite(lo)){lo=-1;hi=1}if(lo===hi){lo-=1;hi+=1}const pad=(hi-lo)*.1;lo-=pad;hi+=pad;x.strokeStyle='#30363d';x.beginPath();x.moveTo(0,h/2);x.lineTo(w,h/2);x.stroke();let k=0;for(const g of Object.values(hist))for(const b of g){if(b.length<2){k++;continue}x.strokeStyle=colors[k%3];x.lineWidth=1.2;x.beginPath();b.forEach((v,i)=>{const px=i/(max-1)*w,py=h-(v-lo)/(hi-lo)*h;i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke();k++}requestAnimationFrame(draw)}
+    const status=document.getElementById('status'),ws=new WebSocket('ws://127.0.0.1:8080/ws/live');
+    ws.onopen=()=>{status.textContent='已连接 Mac，等待 IMU 数据';status.className='status live'};ws.onclose=()=>{status.textContent='Mac 接收服务未连接';status.className='status'};ws.onerror=()=>{status.textContent='无法连接 Mac 接收服务'};
+    ws.onmessage=e=>{if(typeof e.data!=='string')return;const msg=JSON.parse(e.data);if(msg.type!=='imu')return;const A=msg.accel.map(v=>v*scale.acc),G=msg.gyro.map(v=>v*scale.gyro),M=msg.mag.map(v=>v*scale.mag);document.getElementById('sn').textContent=msg.sn||'—';document.getElementById('rate').textContent=msg.rate_hz;document.getElementById('seq').textContent=msg.seq;document.getElementById('count').textContent=msg.sample_count;group('acc',A);group('gyro',G);group('mag',M);push('acc',A);push('gyro',G);push('mag',M);
+      const s=msg.samples||{},n=Math.min(msg.sample_count||0,s.vx?.length||0,s.gx?.length||0,s.mx?.length||0),dt=1/(msg.rate_hz||120);for(let i=0;i<n;i++){const a=[s.vx[i]*scale.acc,s.vy[i]*scale.acc,s.vz[i]*scale.acc],g=[s.gx[i]*scale.gyro,s.gy[i]*scale.gyro,s.gz[i]*scale.gyro],m=[s.mx[i]*scale.mag,s.my[i]*scale.mag,s.mz[i]*scale.mag];fuse(a,g,m,dt)}
+    };
     requestAnimationFrame(draw);
   </script>
 </body>
